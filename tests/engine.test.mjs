@@ -1,0 +1,18 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {metrics,fmt,pct,ratio,growth,valuation,diagnose,parsePrices,validateModelSelection} from '../lib/engine.mjs';
+import {periods,evidence,sources} from '../lib/data.mjs';
+test('正式披露重算：2026累计收入、利润与现金流同比',()=>{const m=metrics();assert.equal(fmt(m.revenue),'1,309.71');assert.equal(pct(m.revenueGrowth),'+1.96%');assert.equal(pct(m.profitGrowth),'-0.25%');assert.equal(pct(m.cfoGrowth),'+120.07%');assert.equal(fmt(m.grossMargin),'89.58');assert.equal(fmt(m.grossChange),'-1.71')});
+test('年度切换保持同比口径，不将季报年化',()=>{const m=metrics('2025FY');assert.equal(pct(m.revenueGrowth),'-1.21%');assert.equal(pct(m.profitGrowth),'-4.53%');assert.equal(m.grossMargin,null);assert.equal(periods['2025FY'].eps,65.66)});
+test('未知期次和缺失分母不静默生成正常数值',()=>{assert.throws(()=>metrics('2026FY'));assert.equal(ratio(5,0),null);assert.equal(ratio(null,5),null);assert.equal(growth(2,0),null);assert.equal(growth(null,5),null);assert.equal(fmt(null),'—');assert.equal(pct(null),'不可计算')});
+test('自然语言问题选择经营质量与财务维度，含现金流反证',()=>{const d=diagnose('利润与现金流是否相互印证？');assert.deepEqual(d.dimensions,['经营质量','财务趋势']);assert.ok(d.claims.includes('E02'));assert.ok(d.claims.includes('E03'))});
+test('合同负债问题同时调取管理层解释与压力证据',()=>{const d=diagnose('合同负债下降说明什么？');assert.ok(d.claims.includes('E04'));assert.ok(d.claims.includes('E08'))});
+test('交易与保证收益问题拦截',()=>{for(const q of ['现在能买吗？','给我目标价','保证翻倍','明天会涨吗','应该加仓吗']){assert.equal(diagnose(q).mode,'boundary');assert.deepEqual(diagnose(q).claims,[])}});
+test('不把唯一公司数据套用到其他标的',()=>{assert.equal(diagnose('比亚迪现金流如何').mode,'unsupported')});
+test('空白、非字符串与超长请求拒绝',()=>{for(const v of ['',null,{},'a'.repeat(601)])assert.throws(()=>diagnose(v))});
+test('接口失败仍保留明确的快照降级身份',()=>{const d=diagnose('现金流变化',{failure:true});assert.equal(d.mode,'fallback');assert.match(d.message,/失败/);assert.match(d.snapshot,/v1$/)});
+test('估值为用户情景；无效价格和亏损EPS不可计算',()=>{assert.equal(valuation(1313.2),20);for(const n of [0,-1,Infinity,NaN,1000001])assert.equal(valuation(n),null);assert.equal(valuation(100,-5),null)});
+test('区间收益与最大回撤以原始价格序列重算',()=>{const r=parsePrices('date,close\n2026-11-02,100\n2026-11-03,120\n2026-11-04,90\n2026-11-05,110');assert.equal(r.drawdown,-25);assert.ok(Math.abs(r.returnPct-10)<1e-9)});
+test('用户CSV拒绝缺失、非正价格、重复或逆序日期、非法日期',()=>{for(const s of ['date,close\n2026-11-02,100','date,close\n2026-11-03,100\n2026-11-02,120','date,close\n2026-11-02,0\n2026-11-03,100','date,close\n2026-11-02,100\n2026-11-02,100','date,close\n2026-02-30,100\n2026-03-03,120','date,close\n2026-11-02,100\n2026-11-03,NaN'])assert.throws(()=>parsePrices(s))});
+test('所有核验证据具备口径、验证路径、后续研究问题与有效来源',()=>{assert.equal(new Set(evidence.map(e=>e.id)).size,evidence.length);for(const e of evidence){assert.ok(e.limit&&e.formula&&e.next);if(e.source)assert.ok(sources[e.source].url.startsWith('https://'));else assert.equal(e.kind,'待验证')}assert.ok(evidence.some(e=>e.stance==='矛盾'));assert.ok(evidence.some(e=>e.stance==='未知'))});
+test('模型选择器拒绝伪造、重复、空和越界证据ID',()=>{assert.ok(validateModelSelection({claimIds:['E02','E03']},['E02','E03']));for(const v of [null,{claimIds:[]},{claimIds:['E99']},{claimIds:['E02','E02']},{text:'买入'}])assert.equal(validateModelSelection(v,['E02','E03']),false)});
